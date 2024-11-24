@@ -6,9 +6,16 @@ import socket
 import typing
 import threading
 import time
+import logging
 from os.path import abspath, dirname
 from random import randint
 
+logging.basicConfig(
+    level = logging.INFO,
+    format = "[%(asctime)s] %(levelname)s %(filename)s %(funcName)s: %(message)s",
+    datefmt = "%H:%M:%S"
+)
+    
 rcon_promises: list[Promise] = []
 
 class RCON_PACKET_TYPE:
@@ -32,9 +39,15 @@ class Promise:
         return self._v
 
 class MinecraftServer:
-    def __init__(self, server_path: str, server_rundir: str = None):
+    def __init__(
+        self,
+        server_path: str,
+        server_rundir: str = None,
+        loghooker: typing.Callable[[str], typing.Any] = lambda x: x
+    ):
         self.server_path = server_path
         self.server_rundir = server_rundir if server_rundir is not None else dirname(abspath(self.server_path))
+        self.loghooker = loghooker
         self.waiting_commands = []
         
         self._spopen = None
@@ -51,8 +64,11 @@ class MinecraftServer:
                 *args
             ], 
             stdin = subprocess.PIPE,
+            stdout = subprocess.PIPE,
             cwd = self.server_rundir
         )
+        
+        threading.Thread(target=self._outputlogs, daemon=True).start()
     
     def stop(self):
         self._check_running()
@@ -62,6 +78,15 @@ class MinecraftServer:
             self._spopen.stdin.flush()
             self._spopen.wait()
         self._spopen = None
+    
+    def _outputlogs(self):
+        while self._spopen.poll() is None:
+            try:
+                line = self.loghooker(self._spopen.stdout.readline().decode().strip("\r"))
+                print(line, end="")
+            except Exception as e:
+                logging.error(f"error in outputlogs: {repr(e)}")
+                continue
     
     def _check_running(self):
         if self._spopen is None: raise Exception("Server is not running")
@@ -109,6 +134,8 @@ class MinecraftServer:
                         rcon_promises.remove(pm)
                         break
             except Exception as e:
+                logging.error(f"error in rcon receive: {repr(e)}")
+                
                 if isinstance(e, ConnectionAbortedError):
                     self.connect_rcon(*self._rcon_logindata)
                     return
@@ -168,7 +195,7 @@ class MinecraftServer:
         else: extend = f" {extend}"
         cstr = f"setblock {x} {y} {z} {block}{extend}"
         self.run_command(cstr, adwl, urcon)
-    
+
 if __name__ == "__main__":
     import fix_workpath as _
     
@@ -182,11 +209,15 @@ if __name__ == "__main__":
     
     import standard_plugin
     
+    plugins: list[standard_plugin] # type: ignore
+    
     DEFAULT_CONFIG = {
         "server_path": None,
         "imblock_colordata_path": None,
+        "server_version": "1.19.2",
         "plugins": [
-            ".\\standard_plugin.py"
+            "./standard_plugin.py",
+            "./builtin-plugins/auto-update-server-version.py"
         ],
         "boot_commands": []
     }
@@ -194,6 +225,10 @@ if __name__ == "__main__":
     if not (exists("mscr_config.json") and isfile("mscr_config.json")):
         with open("mscr_config.json", "w", encoding = "utf-8") as f:
             f.write(json.dumps(DEFAULT_CONFIG, indent=4))
+    
+    class ObjectPacker:
+        def __init__(self, obj: typing.Any):
+            self.obj = obj
     
     def reload():
         global config, server_path
@@ -205,12 +240,11 @@ if __name__ == "__main__":
             config = DEFAULT_CONFIG.copy()
             config.update(json.load(f))
         
-        with open("mscr_config.json", "w", encoding = "utf-8") as f:
-            f.write(json.dumps(config, indent=4))
+        save_config()
         
         server_path = config.get("server_path", None)
         if server_path is None:
-            print("server_path is not set.")
+            logging.fatal("server_path is not set.")
             raise SystemExit
         
         if "plugins" in globals():
@@ -232,9 +266,13 @@ if __name__ == "__main__":
             print("\n".join([
                 f"loaded plugin: {plugin_info["name"]}",
                 f"plugin version: {plugin_info["version"]}",
-                f"plugin description: \n{plugin_info["description"]}",
+                f"plugin description: {plugin_info["description"]}",
                 ""
             ]))
+    
+    def save_config():
+        with open("mscr_config.json", "w", encoding = "utf-8") as f:
+            f.write(json.dumps(config, indent=4))
     
     def load_ibcd():
         global getBlock_ByColor, ibcd_keys, ibcd_values
@@ -251,13 +289,21 @@ if __name__ == "__main__":
             avgs = [(r - v[0]) ** 2 + (g - v[1]) ** 2 + (b - v[2]) ** 2 for v in ibcd_values]
             return ibcd_keys[avgs.index(min(avgs))]
     
+    def loghooker(logline: str):
+        logline_packer = ObjectPacker(logline)
+        for plugin in plugins: plugin.loghooker(logline_packer)
+        return ""
+    
     reload()
     load_ibcd()
     
     class DebugException(BaseException): ...
     caseException = Exception
     
-    server = MinecraftServer(server_path)
+    server = MinecraftServer(
+        server_path = server_path,
+        loghooker = loghooker
+    )
     server.start()
     rcon_mode = False
     
@@ -279,18 +325,18 @@ if __name__ == "__main__":
                 
                 case "cmd" | "command":
                     result = server.run_command(" ".join(ctokens[1:]), urcon=rcon_mode)
-                    if rcon_mode: print(result.wait())
+                    if rcon_mode: logging.info(f"rcon result: {result.wait()}")
                 
                 case "drawim":
                     if not enable_drawim:
-                        print("drawim is disabled.")
+                        logging.error("drawim is disabled.")
                         continue
                         
                     img_path = input("\nimage path > ")
                     x, y, z = map(lambda x: int(float(x)), input("start x y z > ").split(" "))
                     dx, dz = map(lambda x: int(float(x)), input("dx, dz > ").split(" "))
                     maxw, maxh = map(lambda x: int(float(x)), input("maxw, maxh > ").split(" "))
-                    print("drawing...")
+                    logging.info("drawing...")
                     
                     im = Image.open(img_path).convert("RGB")
                     if im.width > maxw: im = im.resize((maxw, int(im.height / im.width * maxw)))
@@ -306,21 +352,21 @@ if __name__ == "__main__":
                             )
                             
                     server.run_adwl(rcon_mode)
-                    print("drawim success.")
+                    logging.info("drawim success.")
                 
                 case "reload-ibcd":
                     if not enable_drawim:
-                        print("drawim is disabled.")
+                        logging.error("drawim is disabled.")
                         continue
 
                     load_ibcd()
-                    print("reload ibcd success.")
+                    logging.info("reload ibcd success.")
                 
                 case "connect-rcon":
                     addr, port = input("addr:port > ").split(":")
                     password = input("password > ")
                     server.connect_rcon(addr, int(port), password)
-                    print("connect rcon success.")
+                    logging.info("connect rcon success.")
                 
                 case "enable-rcon": rcon_mode = True
                 case "disable-rcon": rcon_mode = False
@@ -329,6 +375,6 @@ if __name__ == "__main__":
                     print("\033c", end="")
                 
                 case _:
-                    print("unknown command.")
+                    logging.info("unknown command.")
         except caseException as e:
-            print(f"exception: {e}")
+            logging.error(f"exception: {e}")
