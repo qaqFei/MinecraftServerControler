@@ -18,4 +18,4 @@ def loghooker(packer):
         gvars["save_config"]()
         logging.info(f"Updated server version to {gvars["config"]["server_version"]}")
 
-def __getattribute__(self, name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)
+def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)

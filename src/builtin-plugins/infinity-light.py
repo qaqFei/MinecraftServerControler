@@ -19,9 +19,14 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
     }
     
 def worker():
-    server = _globals()["server"]
+    server = None
+    while not server:
+        try: server = _globals()["server"]
+        except KeyError: time.sleep(1 / 15)
+        
     while True:
+        server.run_command(command="execute at @a[tag=mscr_infinity_light] run fill ~-5 ~-5 ~-5 ~5 ~5 ~5 minecraft:light replace minecraft:air")
         server.run_command(command="execute at @a[tag=mscr_infinity_light] run fill ~-5 ~-5 ~-5 ~5 ~5 ~5 minecraft:light replace minecraft:air")
         time.sleep(ref_dur)
 
-def __getattribute__(self, name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)
+def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)
