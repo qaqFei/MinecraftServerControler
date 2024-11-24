@@ -82,8 +82,8 @@ class MinecraftServer:
     def _outputlogs(self):
         while self._spopen.poll() is None:
             try:
-                line = self.loghooker(self._spopen.stdout.readline().decode().strip("\r"))
-                print(line, end="")
+                line = self.loghooker(self._spopen.stdout.readline().decode().strip("\n").strip("\r"))
+                if line: print(line)
             except Exception as e:
                 logging.error(f"error in outputlogs: {repr(e)}")
                 continue
