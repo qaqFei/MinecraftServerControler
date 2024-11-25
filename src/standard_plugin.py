@@ -8,7 +8,7 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
     globals()["_globals"] = f
     return {
         "name": "standard-plugin",
-        "version": "0.0.1-dev",
+        "version": "builtin-noversion",
         "description": "Standard plugin for Minecraft Server Controler."
     }
 

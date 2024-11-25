@@ -17,5 +17,6 @@ def loghooker(packer):
         gvars["config"]["server_version"] = packer.obj.split(" ")[-1]
         gvars["save_config"]()
         logging.info(f"Updated server version to {gvars["config"]["server_version"]}")
+        del globals()["loghooker"]
 
 def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)

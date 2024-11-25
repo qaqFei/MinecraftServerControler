@@ -7,7 +7,10 @@ import typing
 import threading
 import time
 import logging
-from os.path import abspath, dirname
+import shutil
+import json
+from os import mkdir, remove
+from os.path import abspath, dirname, exists, isfile, isdir
 from random import randint
 
 logging.basicConfig(
@@ -57,6 +60,30 @@ class MinecraftServer:
     def start(self, args: typing.Iterable[str] = ()):
         if self._spopen is not None:
             raise Exception("Server is already running")
+        
+        worldpath = f"{self.server_rundir}/world"
+        datapackname = "minecraftservercontrolerdatapack"
+        datapackpath = f"{worldpath}/datapacks/{datapackname}"
+        
+        if exists(datapackpath) and isdir(datapackpath):
+            logging.warning(f"datapack {datapackname} already exists, deleting...")
+            try: shutil.rmtree(datapackpath)
+            except Exception as e: logging.error(f"error in deleting datapack {datapackname}: {repr(e)}")
+        
+        mkdir(datapackpath)
+        
+        with open(f"{datapackpath}/pack.mcmeta", "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "pack": { 
+                    "pack_format": 0,
+                    "description": "Minecraft Server Controler Datapack"
+                }
+            }))
+        
+        mkdir(f"{datapackpath}/data")
+        mkdir(f"{datapackpath}/data/minecraftservercontroler")
+        self.datapack_funcspath = f"{datapackpath}/data/minecraftservercontroler/functions"
+        mkdir(self.datapack_funcspath)
         
         self._spopen = subprocess.Popen([
                 "java", "-jar",
@@ -190,6 +217,30 @@ class MinecraftServer:
         self.waiting_commands.clear()
         return pm
     
+    def run_adwl_byfunc(self, urcon: bool = False):
+        functext = "\n".join(self.waiting_commands)
+        self.waiting_commands.clear()
+        rfid = randint(0, 2147483647)
+        with open(f"{self.datapack_funcspath}/{rfid}.mcfunction", "w", encoding="utf-8") as f:
+            f.write(functext)
+            
+        pm = self.run_commands([
+            "datapack disable \"file/minecraftservercontrolerdatapack\"",
+            "datapack enable \"file/minecraftservercontrolerdatapack\"",
+            f"function minecraftservercontroler:{rfid}"
+        ], False, urcon)
+        
+        if isinstance(pm, Promise):
+            npm = Promise(-2)
+            def waiter():
+                npm.resolve(pm.wait())
+                try: remove(f"{self.datapack_funcspath}/{rfid}.mcfunction")
+                except Exception as e: logging.error(f"error in remove function file: {repr(e)}")
+            threading.Thread(target=waiter, daemon=True).start()
+            return npm
+        
+        return pm
+    
     def setblock(self, x: int, y: int, z: int, block: str, extend: str|None = None, adwl: bool = False, urcon: bool = False):
         if extend is None: extend = ""
         else: extend = f" {extend}"
@@ -200,9 +251,7 @@ if __name__ == "__main__":
     import fix_workpath as _
     
     import sys
-    import json
     import importlib
-    from os.path import exists, isfile
     
     from PIL import Image
     from numba import jit
@@ -210,6 +259,7 @@ if __name__ == "__main__":
     import standard_plugin
     
     plugins: list[standard_plugin] # type: ignore
+    ibcd_data: dict[str, list[float, float, float]]
     
     DEFAULT_CONFIG = {
         "server_path": None,
@@ -223,7 +273,7 @@ if __name__ == "__main__":
     }
     
     if not (exists("mscr_config.json") and isfile("mscr_config.json")):
-        with open("mscr_config.json", "w", encoding = "utf-8") as f:
+        with open("mscr_config.json", "w", encoding="utf-8") as f:
             f.write(json.dumps(DEFAULT_CONFIG, indent=4))
     
     class ObjectPacker:
@@ -236,7 +286,7 @@ if __name__ == "__main__":
         global boot_commands
         global plugins, enable_drawim
         
-        with open("mscr_config.json", "r", encoding = "utf-8") as f:
+        with open("mscr_config.json", "r", encoding="utf-8") as f:
             config = DEFAULT_CONFIG.copy()
             config.update(json.load(f))
         
@@ -271,16 +321,16 @@ if __name__ == "__main__":
             ]))
     
     def save_config():
-        with open("mscr_config.json", "w", encoding = "utf-8") as f:
+        with open("mscr_config.json", "w", encoding="utf-8") as f:
             f.write(json.dumps(config, indent=4))
     
     def load_ibcd():
-        global getBlock_ByColor, ibcd_keys, ibcd_values
+        global getBlock_ByColor, ibcd_data, ibcd_keys, ibcd_values
         
         if not enable_drawim: return
         
-        with open(imblock_colordata_path, "r", encoding = "utf-8") as f:
-            ibcd_data: dict[str, list[float, float, float]] = json.load(f)
+        with open(imblock_colordata_path, "r", encoding="utf-8") as f:
+            ibcd_data = json.load(f)
             ibcd_keys = tuple(ibcd_data.keys())
             ibcd_values = tuple(map(tuple, tuple(ibcd_data.values())))
     
@@ -288,6 +338,14 @@ if __name__ == "__main__":
         def getBlock_ByColor(r: int, g: int, b: int) -> str:
             avgs = [(r - v[0]) ** 2 + (g - v[1]) ** 2 + (b - v[2]) ** 2 for v in ibcd_values]
             return ibcd_keys[avgs.index(min(avgs))]
+    
+    def save_ibcd():
+        if not enable_drawim: return
+        
+        with open(imblock_colordata_path, "w", encoding="utf-8") as f:
+            json.dump(ibcd_data, f, indent=4)
+        
+        load_ibcd()
     
     def loghooker(logline: str):
         logline_packer = ObjectPacker(logline)
@@ -351,8 +409,12 @@ if __name__ == "__main__":
                                 urcon = rcon_mode
                             )
                             
-                    server.run_adwl(rcon_mode)
+                    server.run_adwl_byfunc(rcon_mode)
                     logging.info("drawim success.")
+                
+                case "reload":
+                    reload()
+                    logging.info("reload success.")
                 
                 case "reload-ibcd":
                     if not enable_drawim:
@@ -361,6 +423,34 @@ if __name__ == "__main__":
 
                     load_ibcd()
                     logging.info("reload ibcd success.")
+                
+                case "test-ibcd":
+                    if not rcon_mode:
+                        logging.error("test ibcd requires rcon mode.")
+                        continue
+                    
+                    logging.info("testing ibcd at position (0 0 0) ...")
+                    
+                    results = {}
+                    for block in ibcd_keys:
+                        cresult = server.run_command(f"setblock 0 0 0 {block}", urcon=True).wait()
+                        results[block] = {
+                            "rcon-result": cresult,
+                            "pass": "Changed the block" in cresult[-1]
+                        }
+                        
+                    test_ibcd_fn = f"./test-ibcd-results-{time.time()}.json"
+                    with open(test_ibcd_fn, "w", encoding="utf-8") as f:
+                        json.dump(results, f, indent=4, ensure_ascii=False)
+                    
+                    logging.info(f"tested ibcd, results saved to {test_ibcd_fn}")
+                    
+                    if "y" in input("please check the results file.\ndo you want to remove the cannot pass block? (y/n) > ").lower():
+                        for block in ibcd_keys:
+                            if not results[block]["pass"]:
+                                ibcd_data.pop(block)
+                                logging.info(f"removed {block}.")
+                        save_ibcd()
                 
                 case "connect-rcon":
                     addr, port = input("addr:port > ").split(":")
