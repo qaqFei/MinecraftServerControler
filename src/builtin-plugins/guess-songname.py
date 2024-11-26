@@ -172,6 +172,9 @@ def loghooker(packer):
             _tellraws(server, "@a", [f"游戏已结束! 被 {sender} 终止", "", *_getstopstate()])
             gsn_data = GSN_DEFAULT.copy()
         
+        case _:
+            _tellraws(server, sender, ["未知命令, 请使用 ~!gsn help 查看帮助信息"])
+        
 def close():
     del globals()["loghooker"]
 
