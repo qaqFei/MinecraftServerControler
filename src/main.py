@@ -41,6 +41,21 @@ class Promise:
         self._e.wait()
         return self._v
 
+class LogWaiterPromise:
+    def __init__(self, server: MinecraftServer, pattern: typing.Callable[[str], bool]):
+        self.pattern = pattern
+        self._e = threading.Event()
+        self._v = None
+        server.log_waiter_promises.append(self)
+    
+    def resolve(self, line: str):
+        self._e.set()
+        self._v = line
+    
+    def wait(self):
+        self._e.wait()
+        return self._v
+
 class MinecraftServer:
     def __init__(
         self,
@@ -51,7 +66,8 @@ class MinecraftServer:
         self.server_path = server_path
         self.server_rundir = server_rundir if server_rundir is not None else dirname(abspath(self.server_path))
         self.loghooker = loghooker
-        self.waiting_commands = []
+        self.waiting_commands: list[str] = []
+        self.log_waiter_promises: list[LogWaiterPromise] = []
         
         self._spopen = None
         self._rcon = None
@@ -109,7 +125,12 @@ class MinecraftServer:
     def _outputlogs(self):
         while self._spopen.poll() is None:
             try:
-                line = self.loghooker(self._spopen.stdout.readline().decode().strip("\n").strip("\r"))
+                rawline = self._spopen.stdout.readline().decode().strip("\n").strip("\r")
+                for lwp in self.log_waiter_promises:
+                    if lwp.pattern(rawline):
+                        lwp.resolve(rawline)
+                    
+                line = self.loghooker(rawline)
                 if line: print(line)
             except Exception as e:
                 logging.error(f"error in outputlogs: {repr(e)}")
@@ -168,7 +189,11 @@ class MinecraftServer:
                     return
                 
                 time.sleep(1 / 15)
-            
+    
+    def _remove_datapack_function(self, name: str):
+        try: remove(f"{self.datapack_funcspath}/{name}.mcfunction")
+        except Exception as e: logging.error(f"error in remove function file: {repr(e)}")
+    
     def connect_rcon(self, addr: str, port: int, password: str):
         try:
             self._rcon = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -230,22 +255,22 @@ class MinecraftServer:
             f"function minecraftservercontroler:{rfid}"
         ], False, urcon)
         
-        if isinstance(pm, Promise):
-            npm = Promise(-2)
-            def waiter():
-                npm.resolve(pm.wait())
-                try: remove(f"{self.datapack_funcspath}/{rfid}.mcfunction")
-                except Exception as e: logging.error(f"error in remove function file: {repr(e)}")
-            threading.Thread(target=waiter, daemon=True).start()
-            return npm
+        if pm is None:
+            pm = LogWaiterPromise(self, lambda line: f"from function 'minecraftservercontroler:{rfid}'" in line)
+            
+        npm = Promise(-2)
+        def waiter():
+            npm.resolve(pm.wait())
+            self._remove_datapack_function(rfid)
+        threading.Thread(target=waiter, daemon=True).start()
         
-        return pm
+        return npm
     
     def setblock(self, x: int, y: int, z: int, block: str, extend: str|None = None, adwl: bool = False, urcon: bool = False):
         if extend is None: extend = ""
         else: extend = f" {extend}"
         cstr = f"setblock {x} {y} {z} {block}{extend}"
-        self.run_command(cstr, adwl, urcon)
+        return self.run_command(cstr, adwl, urcon)
 
 if __name__ == "__main__":
     import fix_workpath as _
@@ -363,7 +388,9 @@ if __name__ == "__main__":
         loghooker = loghooker
     )
     server.start()
+    
     rcon_mode = False
+    heavy_taskrunner = server.run_adwl_byfunc
     
     while True:
         try:
@@ -409,7 +436,7 @@ if __name__ == "__main__":
                                 urcon = rcon_mode
                             )
                             
-                    server.run_adwl_byfunc(rcon_mode)
+                    heavy_taskrunner(rcon_mode)
                     logging.info("drawim success.")
                 
                 case "reload":
@@ -460,6 +487,18 @@ if __name__ == "__main__":
                 
                 case "enable-rcon": rcon_mode = True
                 case "disable-rcon": rcon_mode = False
+                
+                case "set-heavy-task-runner":
+                    runners = [
+                        "run_adwl (using stdin or rcon)",
+                        "run_adwl_byfunc (using datapack function)"
+                    ]
+                    print()
+                    
+                    for i, ri in enumerate(runners):
+                        print(f"{i + 1}. {ri}")
+                    
+                    heavy_taskrunner = getattr(server, input("runner function name > "))
                 
                 case "cls" | "clear":
                     print("\033c", end="")

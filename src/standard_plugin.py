@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import typing
 
 _globals: typing.Callable[[], dict[str, typing.Any]]|None = None
