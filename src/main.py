@@ -275,8 +275,8 @@ class MinecraftServer:
 if __name__ == "__main__":
     import fix_workpath as _
     
-    import sys
     import importlib
+    import builtins
     
     from PIL import Image
     from numba import jit
@@ -326,8 +326,8 @@ if __name__ == "__main__":
             for plugin in plugins: plugin.close()
         
         imblock_colordata_path = config.get("imblock_colordata_path", None)
-        plugin_paths = config.get("plugins", [])
-        boot_commands = config.get("boot_commands", [])
+        plugin_paths = config.get("plugins", []).copy()
+        boot_commands = config.get("boot_commands", []).copy()
         plugins = []
     
         enable_drawim = imblock_colordata_path is not None
@@ -377,6 +377,10 @@ if __name__ == "__main__":
         for plugin in plugins: plugin.loghooker(logline_packer)
         return ""
     
+    def input(*args, **kwargs):
+        if input_waittexts: return input_waittexts.pop(0)
+        return builtins.input(*args, **kwargs)
+    
     reload()
     load_ibcd()
     
@@ -391,13 +395,14 @@ if __name__ == "__main__":
     
     rcon_mode = False
     heavy_taskrunner = server.run_adwl_byfunc
+    input_waittexts = []
     
     while True:
         try:
             if boot_commands:
                 cmd_item = boot_commands.pop(0)
-                ctokens = cmd_item[0]
-                sys.stdin.write("\n".join(cmd_item[1:] + ""))
+                ctokens = cmd_item["ctokens"]
+                input_waittexts.extend(cmd_item["arguments"])
             else:
                 ctokens = list(filter(bool, input(">>> ").split(" ")))
                 
