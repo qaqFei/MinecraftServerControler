@@ -118,7 +118,7 @@ def loghooker(packer):
             
             for s in gsn_data["songs"]:
                 if s[1]: continue
-                indexs = [i for i, c in enumerate(s[0]) if c == tokens[1]]
+                indexs = [i for i, c in enumerate(s[0]) if c.lower() == tokens[1].lower()]
                 slist = list(s[2])
                 for i in indexs: slist[i] = s[0][i]
                 s[2] = "".join(slist)
