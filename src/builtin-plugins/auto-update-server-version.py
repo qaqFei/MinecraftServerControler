@@ -15,6 +15,7 @@ def loghooker(packer):
     if "Starting minecraft server version" in packer.obj:
         gvars = _globals()
         gvars["config"]["server_version"] = packer.obj.split(" ")[-1]
+        gvars["reload"]()
         gvars["save_config"]()
         logging.info(f"Updated server version to {gvars["config"]["server_version"]}")
         del globals()["loghooker"]
