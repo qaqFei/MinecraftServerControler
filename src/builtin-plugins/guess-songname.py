@@ -44,7 +44,11 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
 
 def _getnewsongs():
     return [
-        [s, False, "*" * len(s), "null"]
+        [s, False, "".join([("*" if (
+            ord("a") <= ord(i) <= ord("z") or
+            ord("A") <= ord(i) <= ord("Z") or
+            ord("0") <= ord(i) <= ord("9")
+        ) else i) for i in s]), "null"]
         for s in random.sample(songs, oncenum)
     ]
 
@@ -97,6 +101,7 @@ def loghooker(packer):
             gsn_data = GSN_DEFAULT.copy()
             gsn_data["started"] = True
             gsn_data["songs"] = _getnewsongs()
+            
             _tellraws(server, "@a", [
                 f"猜歌名游戏开始! 发起者: {sender}",
                 "可使用 ~!gsn help 查看帮助信息",
