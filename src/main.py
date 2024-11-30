@@ -271,12 +271,21 @@ class MinecraftServer:
         else: extend = f" {extend}"
         cstr = f"setblock {x} {y} {z} {block}{extend}"
         return self.run_command(cstr, adwl, urcon)
-
+    
+    def get_players(self, urcon: bool = False):
+        pm = self.run_command("list", False, urcon)
+        
+        if pm is None:
+            pm = LogWaiterPromise(self, lambda line: f"There are" in line and f"players online: " in line)
+        
+        return "".join(pm.wait().split("players online: ")[1:]).split(", ")
+        
 if __name__ == "__main__":
     import fix_workpath as _
     
     import importlib
     import builtins
+    import functools
     
     from PIL import Image
     from numba import jit
@@ -374,12 +383,19 @@ if __name__ == "__main__":
     
     def loghooker(logline: str):
         logline_packer = ObjectPacker(logline)
-        for plugin in plugins: plugin.loghooker(logline_packer)
+        for plugin in plugins:
+            plugin.loghooker(logline_packer)
         return ""
     
     def input(*args, **kwargs):
         if input_waittexts: return input_waittexts.pop(0)
         return builtins.input(*args, **kwargs)
+    
+    def tfunc(f: typing.Callable):
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            threading.Thread(target=f, args=args, kwargs=kwargs, daemon=True).start()
+        return wrapper
     
     reload()
     load_ibcd()
@@ -504,6 +520,9 @@ if __name__ == "__main__":
                         print(f"{i + 1}. {ri}")
                     
                     heavy_taskrunner = getattr(server, input("runner function name > "))
+                
+                case "py-exec":
+                    exec(input("code > "))
                 
                 case "cls" | "clear":
                     print("\033c", end="")

@@ -53,10 +53,7 @@ def _getnewsongs():
     ]
 
 def _tellraws(server, target: str, lines: list[str]):
-    return server.run_commands([
-        f"tellraw {target} {json.dumps({"text": line}, ensure_ascii=False)}"
-        for line in lines
-    ])
+    return server.run_command(f"tellraw {target} {json.dumps({"text": "\n".join(lines)}, ensure_ascii=False)}")
 
 def _getstate():
     return ["猜歌名目前进度:"] + [
