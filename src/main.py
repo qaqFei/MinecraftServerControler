@@ -237,17 +237,11 @@ class MinecraftServer:
             self._spopen.stdin.write(command_joined.encode() + b"\n")
             self._spopen.stdin.flush()
     
-    def run_adwl(self, urcon: bool = False):
-        pm = self.run_commands(self.waiting_commands, False, urcon)
-        self.waiting_commands.clear()
-        return pm
-    
-    def run_adwl_byfunc(self, urcon: bool = False):
-        functext = "\n".join(self.waiting_commands)
+    def run_command_byfunc(self, command: str, urcon: bool = False):
         self.waiting_commands.clear()
         rfid = randint(0, 2147483647)
         with open(f"{self.datapack_funcspath}/{rfid}.mcfunction", "w", encoding="utf-8") as f:
-            f.write(functext)
+            f.write(command)
             
         pm = self.run_commands([
             "datapack disable \"file/minecraftservercontrolerdatapack\"",
@@ -266,6 +260,15 @@ class MinecraftServer:
         
         return npm
     
+    def run_adwl(self, urcon: bool = False):
+        pm = self.run_commands(self.waiting_commands, False, urcon)
+        self.waiting_commands.clear()
+        return pm
+    
+    def run_adwl_byfunc(self, urcon: bool = False):
+        functext = "\n".join(self.waiting_commands)
+        return self.run_command_byfunc(functext, False, urcon)
+    
     def setblock(self, x: int, y: int, z: int, block: str, extend: str|None = None, adwl: bool = False, urcon: bool = False):
         if extend is None: extend = ""
         else: extend = f" {extend}"
@@ -279,13 +282,14 @@ class MinecraftServer:
             pm = LogWaiterPromise(self, lambda line: f"There are" in line and f"players online: " in line)
         
         return "".join(pm.wait().split("players online: ")[1:]).split(", ")
-        
+     
 if __name__ == "__main__":
     import fix_workpath as _
     
     import importlib
     import builtins
     import functools
+    import shlex
     
     from PIL import Image
     from numba import jit
@@ -294,6 +298,7 @@ if __name__ == "__main__":
     
     plugins: list[standard_plugin] # type: ignore
     ibcd_data: dict[str, list[float, float, float]]
+    plugin_commands: list[PluginCommand] = []
     
     DEFAULT_CONFIG = {
         "server_path": None,
@@ -333,6 +338,7 @@ if __name__ == "__main__":
         
         if "plugins" in globals():
             for plugin in plugins: plugin.close()
+            plugin_commands.clear()
         
         imblock_colordata_path = config.get("imblock_colordata_path", None)
         plugin_paths = config.get("plugins", []).copy()
@@ -385,6 +391,8 @@ if __name__ == "__main__":
         logline_packer = ObjectPacker(logline)
         for plugin in plugins:
             plugin.loghooker(logline_packer)
+        for command in plugin_commands:
+            command.loghooker(logline_packer)
         return ""
     
     def input(*args, **kwargs):
@@ -396,6 +404,32 @@ if __name__ == "__main__":
         def wrapper(*args, **kwargs):
             threading.Thread(target=f, args=args, kwargs=kwargs, daemon=True).start()
         return wrapper
+    
+    class PluginCommand:
+        def __init__(
+            self,
+            startswith: str,
+            callback: typing.Callable[[MinecraftServer, str, list[str]], typing.Any],
+            allow_users: list[str]|None = None,
+            need_async: bool = False
+        ):
+            self.startswith = f"~!{startswith}"
+            self.callback = callback
+            self.allow_users = allow_users
+            
+            if need_async:
+                self.loghooker = tfunc(self.loghooker)
+        
+        def loghooker(self, packer: ObjectPacker):
+            rawmsg: str = packer.obj
+            if "<" not in rawmsg or ">" not in rawmsg: return
+            
+            sender = rawmsg.split("<")[1].split(">")[0]
+            if self.allow_users and sender not in self.allow_users: return
+            
+            tokens = shlex.split("".join(rawmsg.split("> ")[1:]))
+            if tokens[0].startswith(self.startswith):
+                self.callback(server, sender, tokens[1:])
     
     reload()
     load_ibcd()

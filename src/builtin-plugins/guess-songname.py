@@ -2,24 +2,24 @@ import typing
 import json
 import random
 
-_globals: typing.Callable[[], dict[str, typing.Any]]|None = None
 gsn_admins: list[str]
 songs: list[str] = []
+startswith = "gsn"
 GSN_DEFAULT = {
     "started": False,
     "songs": []
 }
 gsn_data = GSN_DEFAULT.copy()
 
-GSN_HELP = '''\
+GSN_HELP = f'''\
 这里是猜歌插件帮助信息。
-交互需使用前缀: ~!gsn
+交互需使用前缀: ~!{startswith}
 
 命令列表 (省略前缀 带admin的为管理员命令):
 help - 显示帮助信息
 start - 开始游戏
 openletter <letter> - 开指定字母
-guess "<name>" - 猜歌名
+guess <name> - 猜歌名
 admin-stop - 停止游戏
 \
 '''
@@ -28,13 +28,13 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
     global gsn_admins
     global songs, oncenum
     
-    globals()["_globals"] = f
-    
     gvars = f()
     config = gvars["config"]
     gsn_admins = config.get("guess_songname_admins", [])
     songs = config.get("guess_songname_songs", [])
     oncenum = config.get("guess_songname_oncenum", 10)
+    
+    gvars["plugin_commands"].append(gvars["PluginCommand"](startswith=startswith, callback=main))
     
     return {
         "name": "guess-songname",
@@ -62,7 +62,7 @@ def _getstate():
     ]
 
 def _nostart_tl(server, sender: str):
-    _tellraws(server, sender, ["游戏未开始,", "请使用 ~!gsn start 发起并开始游戏"])
+    _tellraws(server, sender, ["游戏未开始,", f"请使用 ~!{startswith} start 发起并开始游戏"])
 
 def _getstopstate():
     return ["游戏已结束, 以下是游戏结果:"] + [
@@ -70,21 +70,10 @@ def _getstopstate():
         for i, s in enumerate(gsn_data["songs"])
     ]
 
-def loghooker(packer):
+def main(server, sender: str, tokens: list[str]):
     global gsn_data
     
-    msg: str = packer.obj
-    if "<" not in msg or ">" not in msg: return
-    
-    sender = msg.split("<")[1].split(">")[0]
-    tokens = list(filter(bool, "".join(msg.split(">")[1][1:]).split(" ")))
-    gvars = _globals()
     is_admin = sender in gsn_admins
-    server = gvars["server"]
-    
-    if len(tokens) < 2: return
-    if tokens[0] != "~!gsn": return
-    tokens.pop(0)
     
     match tokens[0]:
         case "help":
@@ -101,7 +90,7 @@ def loghooker(packer):
             
             _tellraws(server, "@a", [
                 f"猜歌名游戏开始! 发起者: {sender}",
-                "可使用 ~!gsn help 查看帮助信息",
+                f"可使用 ~!{startswith} help 查看帮助信息",
                 "", *_getstate()
             ])
             
@@ -142,11 +131,6 @@ def loghooker(packer):
                 _tellraws(server, sender, ["请输入要猜的歌名"])
                 return
             
-            try: tokens[1] = json.loads(tokens[1])
-            except json.JSONDecodeError:
-                _tellraws(server, sender, ["请输入一个有效的JSON字符串, 例如: \"string\", 可使用 ~!gsn help 查看帮助信息"])
-                return
-            
             for s in gsn_data["songs"]:
                 if s[1]: continue
                 if s[0] == tokens[1]:
@@ -175,9 +159,6 @@ def loghooker(packer):
             gsn_data = GSN_DEFAULT.copy()
         
         case _:
-            _tellraws(server, sender, ["未知命令, 请使用 ~!gsn help 查看帮助信息"])
+            _tellraws(server, sender, [f"未知命令, 请使用 ~!{startswith} help 查看帮助信息"])
         
-def close():
-    del globals()["loghooker"]
-
 def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)

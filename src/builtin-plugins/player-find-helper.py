@@ -2,30 +2,25 @@ import typing
 import json
 import re
 
-_globals: typing.Callable[[], dict[str, typing.Any]]|None = None
-pfh_admins: list[str]
+startswith = "pfh"
 
-PFH_HELP = '''\
-交互需使用前缀: ~!pfh
+PFH_HELP = f'''\
+交互需使用前缀: ~!{startswith}
 
 命令列表:
-find-sw "<name>" - 查找以指定字符串开头的玩家
-find-ew "<name>" - 查找以指定字符串结尾的玩家
-find-in "<name>" - 查找包含指定字符串的玩家
-find-re "<regular-expressions>" - 使用正则表达式查找玩家
+find-sw <name> - 查找以指定字符串开头的玩家
+find-ew <name> - 查找以指定字符串结尾的玩家
+find-in <name> - 查找包含指定字符串的玩家
+find-re <regular-expressions> - 使用正则表达式查找玩家
 \
 '''
 
 def init(f: typing.Callable[[], dict[str, typing.Any]]):
-    global pfh_admins
-    
-    globals()["_globals"] = f
-    
     gvars = f()
     config = gvars["config"]
     pfh_admins = config.get("player_find_helper_admins", [])
     
-    globals()["loghooker"] = gvars["tfunc"](loghooker)
+    gvars["plugin_commands"].append(gvars["PluginCommand"](startswith=startswith, callback=main, allow_users=pfh_admins, need_async=True))
     
     return {
         "name": "player-find-helper",
@@ -36,27 +31,8 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
 def _tellraws(server, target: str, raw: dict):
     return server.run_command(f"tellraw {target} {json.dumps(raw, ensure_ascii=False)}")
 
-def loghooker(packer):
-    msg: str = packer.obj
-    if "<" not in msg or ">" not in msg: return
-    
-    sender = msg.split("<")[1].split(">")[0]
-    tokens = list(filter(bool, "".join(msg.split(">")[1][1:]).split(" ")))
-    gvars = _globals()
-    server = gvars["server"]
-    
-    if len(tokens) < 2: return
-    if tokens[0] != "~!pfh": return
-    tokens.pop(0)
-    
-    if sender not in pfh_admins: return
+def main(server, sender: str, tokens: list[str]):
     players: list[str] = server.get_players()
-    
-    try:
-        tokens[1] = json.loads(tokens[1])
-    except json.JSONDecodeError:
-        _tellraws(server, sender, {"text": "参数错误, 请使用 ~!pfh help 查看帮助信息"})
-        return
     
     def postresult(result: list[str]):
         _tellraws(server, sender, [
@@ -76,7 +52,7 @@ def loghooker(packer):
     
     match tokens[0]:
         case "help":
-            _tellraws(server, sender, [PFH_HELP])
+            _tellraws(server, sender, {"text": PFH_HELP})
         
         case "find-sw":
             result = list(filter(lambda x: x.startswith(tokens[1]), players))
@@ -95,9 +71,6 @@ def loghooker(packer):
             postresult(result)
 
         case _:
-            _tellraws(server, sender, {"text": "未知命令, 请使用 ~!pfh help 查看帮助信息"})
-        
-def close():
-    del globals()["loghooker"]
+            _tellraws(server, sender, {"text": f"未知命令, 请使用 ~!{startswith} help 查看帮助信息"})
 
 def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)
