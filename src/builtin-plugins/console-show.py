@@ -1,5 +1,6 @@
 import typing
 import json
+import time
 
 import cv2
 from PIL import Image
@@ -82,9 +83,11 @@ def main(server, sender: str, tokens: list[str]):
             
             case "show-video":
                 cap = cv2.VideoCapture(tokens[1])
-                fps = cap.get(cv2.CAP_PROP_FPS)
+                ft = 1.0 / cap.get(cv2.CAP_PROP_FPS)
                 
                 while True:
+                    st = time.time()
+                    
                     ret, frame = cap.read()
                     if not ret: break
                     
@@ -119,6 +122,8 @@ def main(server, sender: str, tokens: list[str]):
                             "contents": raw
                         }
                     })
+                    
+                    time.sleep(max(0, ft - (time.time() - st)))
     except Exception as e:
         _tellraws(server, sender, {"text": f"发生错误: {repr(e)}", "color": "red"})
 

@@ -73,7 +73,7 @@ class MinecraftServer:
         self._rcon = None
         self._rcon_logindata = None
     
-    def start(self, args: typing.Iterable[str] = ()):
+    def start(self, args: typing.Iterable[str] = (), max_mem: str = "768M"):
         if self._spopen is not None:
             raise Exception("Server is already running")
         
@@ -86,7 +86,10 @@ class MinecraftServer:
             try: shutil.rmtree(datapackpath)
             except Exception as e: logging.error(f"error in deleting datapack {datapackname}: {repr(e)}")
         
-        mkdir(datapackpath)
+        try: mkdir(datapackpath)
+        except FileNotFoundError as e:
+            logging.error(f"error in creating datapack {datapackname}: world folder not found")
+            raise Exception("world folder not found") from e
         
         with open(f"{datapackpath}/pack.mcmeta", "w", encoding="utf-8") as f:
             f.write(json.dumps({
@@ -102,13 +105,14 @@ class MinecraftServer:
         mkdir(self.datapack_funcspath)
         
         self._spopen = subprocess.Popen([
-                "java", "-jar",
+                "java", f"-Xmx{max_mem}", "-jar",
                 self.server_path,
                 *args
             ], 
             stdin = subprocess.PIPE,
             stdout = subprocess.PIPE,
-            cwd = self.server_rundir
+            cwd = self.server_rundir,
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
         )
         
         threading.Thread(target=self._outputlogs, daemon=True).start()
@@ -295,6 +299,7 @@ if __name__ == "__main__":
     from numba import jit
     
     import standard_plugin
+    import midi_parse
     
     plugins: list[standard_plugin] # type: ignore
     ibcd_data: dict[str, list[float, float, float]]
@@ -318,7 +323,10 @@ if __name__ == "__main__":
     class ObjectPacker:
         def __init__(self, obj: typing.Any):
             self.obj = obj
-    
+
+    def parse_shell(cmd: str):
+        return list(map(lambda x: x[1:-1] if x.startswith("\"") and x.endswith("\"") else x, shlex.split(cmd, posix=False)))
+        
     def reload():
         global config, server_path
         global imblock_colordata_path
@@ -405,6 +413,18 @@ if __name__ == "__main__":
             threading.Thread(target=f, args=args, kwargs=kwargs, daemon=True).start()
         return wrapper
     
+    def getplaysoundtype_bynote(note: int):
+        note = note if 30 <= note <= 102 else (30 if note < 30 else 102)
+        typemap = sorted([
+            ("bass", 30, 0.8),
+            ("guitar", 42, 1.0),
+            ("pling", 54, 1.5),
+            ("xylophone", 78, 3),
+        ], reverse=True)
+        for name, start, volume in typemap:
+            if start <= note <= start + 24:
+                return name, 2 ** ((-12 + note - start) / 12), volume
+    
     class PluginCommand:
         def __init__(
             self,
@@ -427,7 +447,7 @@ if __name__ == "__main__":
             sender = rawmsg.split("<")[1].split(">")[0]
             if self.allow_users and sender not in self.allow_users: return
             
-            tokens = shlex.split("".join(rawmsg.split("> ")[1:]))
+            tokens = parse_shell("".join(rawmsg.split("> ")[1:]))
             if tokens[0].startswith(self.startswith):
                 self.callback(server, sender, tokens[1:])
     
@@ -435,7 +455,7 @@ if __name__ == "__main__":
     load_ibcd()
     
     class DebugException(BaseException): ...
-    caseException = Exception
+    caseException = (Exception, KeyboardInterrupt)
     
     server = MinecraftServer(
         server_path = server_path,
@@ -454,7 +474,7 @@ if __name__ == "__main__":
                 ctokens = cmd_item["ctokens"]
                 input_waittexts.extend(cmd_item["arguments"])
             else:
-                ctokens = list(filter(bool, input(">>> ").split(" ")))
+                ctokens = parse_shell(input(">>> "))
                 
             if not ctokens: continue
             
@@ -493,6 +513,24 @@ if __name__ == "__main__":
                             
                     heavy_taskrunner(rcon_mode)
                     logging.info("drawim success.")
+                
+                case "play_midi":
+                    mid = midi_parse.MidiFile(open(ctokens[1], "rb").read())
+                    more_delta = 0.0
+                    for msg in mid.play():
+                        dt = msg["global_sec_delta"] - more_delta
+                        time.sleep(max(dt, 0.0))
+                        t = time.perf_counter()
+                        print(f"\rnow time: {msg["sec_time"]:.2f}s / {mid.second_length:.2f}s", end="")
+                        
+                        match msg["type"]:
+                            case "note_on":
+                                name, note, volume = getplaysoundtype_bynote(msg["note"])
+                                command = f"execute at @r run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ {volume} {note}"
+                                result = server.run_command(command, urcon=rcon_mode)
+                                if rcon_mode: result.wait()
+                                
+                        more_delta = time.perf_counter() - t
                 
                 case "reload":
                     reload()
@@ -565,3 +603,4 @@ if __name__ == "__main__":
                     logging.info("unknown command.")
         except caseException as e:
             logging.error(f"exception: {e}")
+            
