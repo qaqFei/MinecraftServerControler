@@ -81,15 +81,17 @@ class MinecraftServer:
         datapackname = "minecraftservercontrolerdatapack"
         datapackpath = f"{worldpath}/datapacks/{datapackname}"
         
+        try: mkdir(worldpath)
+        except FileExistsError: pass
+        try: mkdir(f"{worldpath}/datapacks")
+        except FileExistsError: pass
+        
         if exists(datapackpath) and isdir(datapackpath):
             logging.warning(f"datapack {datapackname} already exists, deleting...")
             try: shutil.rmtree(datapackpath)
             except Exception as e: logging.error(f"error in deleting datapack {datapackname}: {repr(e)}")
         
-        try: mkdir(datapackpath)
-        except FileNotFoundError as e:
-            logging.error(f"error in creating datapack {datapackname}: world folder not found")
-            raise Exception("world folder not found") from e
+        mkdir(datapackpath)
         
         with open(f"{datapackpath}/pack.mcmeta", "w", encoding="utf-8") as f:
             f.write(json.dumps({
@@ -326,7 +328,13 @@ if __name__ == "__main__":
 
     def parse_shell(cmd: str):
         return list(map(lambda x: x[1:-1] if x.startswith("\"") and x.endswith("\"") else x, shlex.split(cmd, posix=False)))
-        
+    
+    def load_module(path: str):
+        spec = importlib.util.spec_from_file_location(f"module_{randint(0, 2147483647)}", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    
     def reload():
         global config, server_path
         global imblock_colordata_path
@@ -356,9 +364,7 @@ if __name__ == "__main__":
         enable_drawim = imblock_colordata_path is not None
 
         for plugin in plugin_paths:
-            spec = importlib.util.spec_from_file_location(f"plugin_{randint(0, 2147483647)}", plugin)
-            plugin_mod: standard_plugin = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(plugin_mod)
+            plugin_mod: standard_plugin = load_module(plugin)
             plugin_info = plugin_mod.init(lambda: globals())
             plugins.append(plugin_mod)
             print("\n".join([
@@ -416,14 +422,19 @@ if __name__ == "__main__":
     def getplaysoundtype_bynote(note: int):
         note = note if 30 <= note <= 102 else (30 if note < 30 else 102)
         typemap = sorted([
-            ("bass", 30, 0.8),
-            ("guitar", 42, 1.0),
-            ("pling", 54, 1.5),
-            ("xylophone", 78, 3),
+            ("bass", 30),
+            ("guitar", 42),
+            ("pling", 54),
+            ("xylophone", 78),
         ], reverse=True)
-        for name, start, volume in typemap:
+        for name, start in typemap:
             if start <= note <= start + 24:
-                return name, 2 ** ((-12 + note - start) / 12), volume
+                return name, 2 ** ((-12 + note - start) / 12)
+    
+    dev_f: typing.Callable[[dict[str, typing.Any]], typing.Any]
+    def reload_devhot():
+        global dev_f
+        dev_f = load_module("./_devhotload.py").f
     
     class PluginCommand:
         def __init__(
@@ -451,6 +462,7 @@ if __name__ == "__main__":
             if tokens[0].startswith(self.startswith):
                 self.callback(server, sender, tokens[1:])
     
+    reload_devhot()
     reload()
     load_ibcd()
     
@@ -515,6 +527,7 @@ if __name__ == "__main__":
                     logging.info("drawim success.")
                 
                 case "play_midi":
+                    print("tip: playsound is executed at @e[tag=midi_player]")
                     mid = midi_parse.MidiFile(open(ctokens[1], "rb").read())
                     more_delta = 0.0
                     for msg in mid.play():
@@ -522,15 +535,18 @@ if __name__ == "__main__":
                         time.sleep(max(dt, 0.0))
                         t = time.perf_counter()
                         print(f"\rnow time: {msg["sec_time"]:.2f}s / {mid.second_length:.2f}s", end="")
-                        
+
                         match msg["type"]:
                             case "note_on":
-                                name, note, volume = getplaysoundtype_bynote(msg["note"])
-                                command = f"execute at @r run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ {volume} {note}"
+                                name, note = getplaysoundtype_bynote(msg["note"])
+                                command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ 1.0 {note} 1.0"
                                 result = server.run_command(command, urcon=rcon_mode)
                                 if rcon_mode: result.wait()
-                                
+
                         more_delta = time.perf_counter() - t
+                
+                case "_devhot_reload":
+                    reload_devhot()
                 
                 case "reload":
                     reload()
