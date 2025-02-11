@@ -422,14 +422,14 @@ if __name__ == "__main__":
     def getplaysoundtype_bynote(note: int):
         note = note if 30 <= note <= 102 else (30 if note < 30 else 102)
         typemap = sorted([
-            ("bass", 30),
-            ("guitar", 42),
-            ("pling", 54),
-            ("xylophone", 78),
+            ("bass", 30, 2),
+            ("guitar", 42, 1),
+            ("pling", 54, 1),
+            ("xylophone", 78, 5),
         ], reverse=True)
-        for name, start in typemap:
+        for name, start, num in typemap:
             if start <= note <= start + 24:
-                return name, 2 ** ((-12 + note - start) / 12)
+                return name, 2 ** ((-12 + note - start) / 12), num
     
     dev_f: typing.Callable[[dict[str, typing.Any]], typing.Any]
     def reload_devhot():
@@ -538,10 +538,9 @@ if __name__ == "__main__":
 
                         match msg["type"]:
                             case "note_on":
-                                name, note = getplaysoundtype_bynote(msg["note"])
+                                name, note, num = getplaysoundtype_bynote(msg["note"])
                                 command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ 1.0 {note} 1.0"
-                                result = server.run_command(command, urcon=rcon_mode)
-                                if rcon_mode: result.wait()
+                                for _ in range(num): server.run_command(command, urcon=rcon_mode)
 
                         more_delta = time.perf_counter() - t
                 
