@@ -12,7 +12,7 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
     tsday_admins = config.get("tsday_admins", [])
 
     return {
-        "name": "tsday-plugin",
+        "name": "tsday",
         "version": "0.0.1",
         "description": "Set time to day."
     }

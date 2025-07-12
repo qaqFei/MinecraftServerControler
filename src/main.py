@@ -459,7 +459,7 @@ if __name__ == "__main__":
             if self.allow_users and sender not in self.allow_users: return
             
             tokens = parse_shell("".join(rawmsg.split("> ")[1:]))
-            if tokens[0].startswith(self.startswith):
+            if tokens[0] == self.startswith:
                 self.callback(server, sender, tokens[1:])
     
     reload_devhot()
