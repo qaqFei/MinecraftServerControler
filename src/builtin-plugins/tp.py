@@ -10,7 +10,7 @@ def init(f: typing.Callable[[], dict[str, typing.Any]]):
     gvars["plugin_commands"].append(gvars["PluginCommand"](startswith="tp", callback=main, need_async=True))
     gvars["plugin_commands"].append(gvars["PluginCommand"](startswith="c-tp-aa", callback=tp_addalias, need_async=True))
     config = gvars["config"]
-    global_alias = config.get("global_tp_alias", [])
+    global_alias = config.get("global_tp_alias", {})
 
     return {
         "name": "tp-plugin",
