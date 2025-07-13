@@ -539,10 +539,13 @@ if __name__ == "__main__":
                         match msg["type"]:
                             case "note_on":
                                 name, note, num = getplaysoundtype_bynote(msg["note"])
-                                command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ 1.0 {note} 1.0"
+                                vol = msg["velocity"] / 127
+                                command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ {vol} {note} {vol}"
                                 for _ in range(num): server.run_command(command, urcon=rcon_mode)
 
                         more_delta = time.perf_counter() - t
+                        # if dt < 0.0:
+                        #     more_delta += -dt
                 
                 case "_devhot_reload":
                     reload_devhot()
