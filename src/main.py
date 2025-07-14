@@ -43,6 +43,7 @@ class Promise:
 
 class LogWaiterPromise:
     def __init__(self, server: MinecraftServer, pattern: typing.Callable[[str], bool]):
+        self.server = server
         self.pattern = pattern
         self._e = threading.Event()
         self._v = None
@@ -56,6 +57,145 @@ class LogWaiterPromise:
         self._e.wait()
         return self._v
 
+class CmdRunner:
+    def __init__(self, server: MinecraftServer):
+        self.server = server
+    
+    def run(self, cmd: str) -> str:
+        return self.server.run_command(cmd, urcon=True).wait()
+    
+    def kill(self, selector: str):
+        res = self.run(f"kill {selector}")
+        return res[res.index("]: ") + 3:]
+    
+    def give(self, selector: str, item: str, count: int = 1, nbt: typing.Optional[dict] = None):
+        if nbt is None:
+            nbt = {}
+        
+        return self.run(f"give {selector} {item}{json.dumps(nbt)} {count}")
+    
+    def tp(self, selector: str, target: str):
+        return self.run(f"tp {selector} {target}")
+    
+    def effect_give(self, selector: str, effect: str, duration: int, amplifier: int = 0, hideparticles: bool = False):
+        return self.run(f"effect give {selector} {effect} {duration} {amplifier} {json.dumps(hideparticles)}")
+    
+    def effect_clear(self, selector: str, effect: str):
+        return self.run(f"effect clear {selector} {effect}")
+    
+    def clear(self, selector: str, item: typing.Optional[str] = None):
+        if item is None:
+            item = ""
+        else:
+            item = f" {item}"
+            
+        return self.run(f"clear {selector}{item}")
+    
+    def advancement_grant(self, selector: str, advancement: str):
+        return self.run(f"advancement grant {selector} {advancement}")
+    
+    def advancement_revoke(self, selector: str, advancement: str):
+        return self.run(f"advancement revoke {selector} {advancement}")
+    
+    def attribute_get(self, selector: str, attribute: str, scale: typing.Optional[float] = None):
+        if scale is None:
+            scale = ""
+        else:
+            scale = f" {scale}"
+        
+        return self.run(f"attribute {selector} {attribute} get{scale}")
+    
+    def attribute_base(self, method: typing.Literal["set", "get"], selector: str, attribute: str, sov: typing.Optional[float] = ""):
+        if sov is None:
+            sov = ""
+        else:
+            sov = f" {sov}"
+
+        return self.run(f"attribute {selector} {attribute} base {method}{sov}")
+    
+    def ban(self, selector: str, reason: typing.Optional[str] = None):
+        if reason is None:
+            reason = ""
+        else:
+            reason = f" {reason}"
+
+        return self.run(f"ban {selector}{reason}")
+    
+    def ban_ip(self, selector: str, reason: typing.Optional[str] = None):
+        if reason is None:
+            reason = ""
+        else:
+            reason = f" {reason}"
+
+        return self.run(f"ban-ip {selector}{reason}")
+    
+    def banlist(self, t: typing.Literal["ips", "players"]):
+        return self.run(f"banlist {t}")
+    
+    def setblock(self, x: str, y: str, z: str, block: str, mode: typing.Optional[str] = None):
+        if mode is None:
+            mode = ""
+        else:
+            mode = f" {mode}"
+
+        return self.run(f"setblock {x} {y} {z} {block}{mode}")
+    
+    def fill(self, x1: str, y1: str, z1: str, x2: str, y2: str, z2: str, block: str, mode: typing.Optional[str] = None):
+        if mode is None:
+            mode = ""
+        else:
+            mode = f" {mode}"
+            
+        return self.run(f"fill {x1} {y1} {z1} {x2} {y2} {z2} {block}{mode}")
+    
+    def reload(self):
+        return self.run("reload")
+    
+    def op(self, selector: str):
+        return self.run(f"op {selector}")
+
+    def deop(self, selector: str):
+        return self.run(f"deop {selector}")
+    
+    def stop(self):
+        return self.run("stop")
+    
+    def datapack_enable(self, name: str):
+        return self.run(f"datapack enable {name}")
+    
+    def datapack_disable(self, name: str):
+        return self.run(f"datapack disable {name}")
+
+    def datapack_list(self):
+        return self.run("datapack list")
+    
+    def list(self):
+        return self.run("list")
+    
+    def pardon(self, selector: str):
+        return self.run(f"pardon {selector}")
+
+    def pardon_ip(self, selector: str):
+        return self.run(f"pardon-ip {selector}")
+    
+    def msg(self, selector: str, msg: str):
+        return self.run(f"msg {selector} {msg}")
+    
+    def tellraw(self, selector: str, msg: dict):
+        return self.run(f"tellraw {selector} {json.dumps(msg)}")
+    
+    def data_get(self, path: str):
+        return self.run(f"data get {path}")
+    
+    def data_merge(self, path: str, value: dict):
+        return self.run(f"data merge {path} {json.dumps(value)}")
+
+    def data_modify(self, path: str, value: dict):
+        return self.run(f"data modify {path} {json.dumps(value)}")
+    
+    def data_remove(self, path: str):
+        return self.run(f"data remove {path}")
+    
 class MinecraftServer:
     def __init__(
         self,
@@ -68,6 +208,7 @@ class MinecraftServer:
         self.loghooker = loghooker
         self.waiting_commands: list[str] = []
         self.log_waiter_promises: list[LogWaiterPromise] = []
+        self.cmd_runner = CmdRunner(self)
         
         self._spopen = None
         self._rcon = None
@@ -132,9 +273,10 @@ class MinecraftServer:
         while self._spopen.poll() is None:
             try:
                 rawline = self._spopen.stdout.readline().decode().strip("\n").strip("\r")
-                for lwp in self.log_waiter_promises:
+                for lwp in self.log_waiter_promises.copy():
                     if lwp.pattern(rawline):
                         lwp.resolve(rawline)
+                        self.log_waiter_promises.remove(lwp)
                     
                 line = self.loghooker(rawline)
                 if line: print(line)
@@ -288,7 +430,7 @@ class MinecraftServer:
             pm = LogWaiterPromise(self, lambda line: f"There are" in line and f"players online: " in line)
         
         return "".join(pm.wait().split("players online: ")[1:]).split(", ")
-     
+    
 if __name__ == "__main__":
     import fix_workpath as _
     
@@ -596,8 +738,8 @@ if __name__ == "__main__":
                     server.connect_rcon(addr, int(port), password)
                     logging.info("connect rcon success.")
                 
-                case "enable-rcon": rcon_mode = True
-                case "disable-rcon": rcon_mode = False
+                case "enable-rcon": server.cmd_runner.rcon_mode = rcon_mode = True
+                case "disable-rcon": server.cmd_runner.rcon_mode = rcon_mode = False
                 
                 case "set-heavy-task-runner":
                     runners = [
