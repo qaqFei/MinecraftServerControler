@@ -36,7 +36,5 @@ def main(server, sender: str, _):
         "text": f"{sender} 使用了 tsday 命令，已将时间设置为白天",
         "color": "green"
     })
-    
-    server.cmd_runner.kill("@e")
 
 def __getattr__(name: str) -> typing.Any: return globals().get(name, lambda *args, **kwargs: None)
