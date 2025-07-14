@@ -620,6 +620,140 @@ if __name__ == "__main__":
     heavy_taskrunner = server.run_adwl_byfunc
     input_waittexts = []
     
+    def run_userinputcmd(ctokens: list[str]):
+        global rcon_mode
+        global heavy_taskrunner
+        
+        match ctokens[0]:
+            case "stop" | "exit" | "quit":
+                server.stop()
+                return "break"
+            
+            case "cmd" | "command":
+                result = server.run_command(" ".join(ctokens[1:]), urcon=rcon_mode)
+                if rcon_mode: logging.info(f"rcon result: {result.wait()}")
+            
+            case "drawim":
+                if not enable_drawim:
+                    logging.error("drawim is disabled.")
+                    return
+                    
+                img_path = input("\nimage path > ")
+                x, y, z = map(lambda x: int(float(x)), input("start x y z > ").split(" "))
+                dx, dz = map(lambda x: int(float(x)), input("dx, dz > ").split(" "))
+                maxw, maxh = map(lambda x: int(float(x)), input("maxw, maxh > ").split(" "))
+                logging.info("drawing...")
+                
+                im = Image.open(img_path).convert("RGB")
+                if im.width > maxw: im = im.resize((maxw, int(im.height / im.width * maxw)))
+                if im.height > maxh: im = im.resize((int(im.width / im.height * maxh), maxh))
+                
+                for imx in range(im.width):
+                    for imy in range(im.height):
+                        server.setblock(
+                            x + imx * dx, y, z + imy * dz,
+                            getBlock_ByColor(*im.getpixel((imx, imy))),
+                            adwl = True,
+                            urcon = rcon_mode
+                        )
+                        
+                heavy_taskrunner(rcon_mode)
+                logging.info("drawim success.")
+            
+            case "play_midi":
+                print("tip: playsound is executed at @e[tag=midi_player]")
+                mid = midi_parse.MidiFile(open(" ".join(ctokens[1:]), "rb").read())
+                more_delta = 0.0
+                for msg in mid.play():
+                    dt = msg["global_sec_delta"] - more_delta
+                    time.sleep(max(dt, 0.0))
+                    t = time.perf_counter()
+                    print(f"\rnow time: {msg["sec_time"]:.2f}s / {mid.second_length:.2f}s", end="")
+                    
+                    match msg["type"]:
+                        case "note_on":
+                            name, note, num = getplaysoundtype_bynote(msg["note"])
+                            vol = msg["velocity"] / 127
+                            command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ {vol} {note} {vol}"
+                            for _ in range(num): server.run_command(command, urcon=rcon_mode)
+                            
+                    more_delta = time.perf_counter() - t
+                    # if dt < 0.0:
+                    #     more_delta += -dt
+            
+            case "_devhot_reload":
+                reload_devhot()
+            
+            case "reload":
+                reload()
+                logging.info("reload success.")
+            
+            case "reload-ibcd":
+                if not enable_drawim:
+                    logging.error("drawim is disabled.")
+                    return
+                
+                load_ibcd()
+                logging.info("reload ibcd success.")
+            
+            case "test-ibcd":
+                if not rcon_mode:
+                    logging.error("test ibcd requires rcon mode.")
+                    return
+                
+                logging.info("testing ibcd at position (0 0 0) ...")
+                
+                results = {}
+                for block in ibcd_keys:
+                    cresult = server.run_command(f"setblock 0 0 0 {block}", urcon=True).wait()
+                    results[block] = {
+                        "rcon-result": cresult,
+                        "pass": "Changed the block" in cresult[-1]
+                    }
+                    
+                test_ibcd_fn = f"./test-ibcd-results-{time.time()}.json"
+                with open(test_ibcd_fn, "w", encoding="utf-8") as f:
+                    json.dump(results, f, indent=4, ensure_ascii=False)
+                
+                logging.info(f"tested ibcd, results saved to {test_ibcd_fn}")
+                
+                if "y" in input("please check the results file.\ndo you want to remove the cannot pass block? (y/n) > ").lower():
+                    for block in ibcd_keys:
+                        if not results[block]["pass"]:
+                            ibcd_data.pop(block)
+                            logging.info(f"removed {block}.")
+                    save_ibcd()
+            
+            case "connect-rcon":
+                addr, port = input("addr:port > ").split(":")
+                password = input("password > ")
+                server.connect_rcon(addr, int(port), password)
+                logging.info("connect rcon success.")
+            
+            case "enable-rcon": rcon_mode = True
+            case "disable-rcon": rcon_mode = False
+            
+            case "set-heavy-task-runner":
+                runners = [
+                    "run_adwl (using stdin or rcon)",
+                    "run_adwl_byfunc (using datapack function)"
+                ]
+                print()
+                
+                for i, ri in enumerate(runners):
+                    print(f"{i + 1}. {ri}")
+                
+                heavy_taskrunner = getattr(server, input("runner function name > "))
+            
+            case "py-exec":
+                exec(input("code > "))
+            
+            case "cls" | "clear":
+                print("\033c", end="")
+            
+            case _:
+                logging.info("unknown command.")
+    
     while True:
         try:
             if boot_commands:
@@ -630,136 +764,10 @@ if __name__ == "__main__":
                 ctokens = parse_shell(input(">>> "))
                 
             if not ctokens: continue
+            res = run_userinputcmd(ctokens)
             
-            match ctokens[0]:
-                case "stop" | "exit" | "quit":
-                    server.stop()
-                    break
-                
-                case "cmd" | "command":
-                    result = server.run_command(" ".join(ctokens[1:]), urcon=rcon_mode)
-                    if rcon_mode: logging.info(f"rcon result: {result.wait()}")
-                
-                case "drawim":
-                    if not enable_drawim:
-                        logging.error("drawim is disabled.")
-                        continue
-                        
-                    img_path = input("\nimage path > ")
-                    x, y, z = map(lambda x: int(float(x)), input("start x y z > ").split(" "))
-                    dx, dz = map(lambda x: int(float(x)), input("dx, dz > ").split(" "))
-                    maxw, maxh = map(lambda x: int(float(x)), input("maxw, maxh > ").split(" "))
-                    logging.info("drawing...")
-                    
-                    im = Image.open(img_path).convert("RGB")
-                    if im.width > maxw: im = im.resize((maxw, int(im.height / im.width * maxw)))
-                    if im.height > maxh: im = im.resize((int(im.width / im.height * maxh), maxh))
-                    
-                    for imx in range(im.width):
-                        for imy in range(im.height):
-                            server.setblock(
-                                x + imx * dx, y, z + imy * dz,
-                                getBlock_ByColor(*im.getpixel((imx, imy))),
-                                adwl = True,
-                                urcon = rcon_mode
-                            )
-                            
-                    heavy_taskrunner(rcon_mode)
-                    logging.info("drawim success.")
-                
-                case "play_midi":
-                    print("tip: playsound is executed at @e[tag=midi_player]")
-                    mid = midi_parse.MidiFile(open(ctokens[1], "rb").read())
-                    more_delta = 0.0
-                    for msg in mid.play():
-                        dt = msg["global_sec_delta"] - more_delta
-                        time.sleep(max(dt, 0.0))
-                        t = time.perf_counter()
-                        print(f"\rnow time: {msg["sec_time"]:.2f}s / {mid.second_length:.2f}s", end="")
-
-                        match msg["type"]:
-                            case "note_on":
-                                name, note, num = getplaysoundtype_bynote(msg["note"])
-                                vol = msg["velocity"] / 127
-                                command = f"execute at @e[tag=midi_player] run playsound minecraft:block.note_block.{name} block @a ~ ~ ~ {vol} {note} {vol}"
-                                for _ in range(num): server.run_command(command, urcon=rcon_mode)
-
-                        more_delta = time.perf_counter() - t
-                        # if dt < 0.0:
-                        #     more_delta += -dt
-                
-                case "_devhot_reload":
-                    reload_devhot()
-                
-                case "reload":
-                    reload()
-                    logging.info("reload success.")
-                
-                case "reload-ibcd":
-                    if not enable_drawim:
-                        logging.error("drawim is disabled.")
-                        continue
-
-                    load_ibcd()
-                    logging.info("reload ibcd success.")
-                
-                case "test-ibcd":
-                    if not rcon_mode:
-                        logging.error("test ibcd requires rcon mode.")
-                        continue
-                    
-                    logging.info("testing ibcd at position (0 0 0) ...")
-                    
-                    results = {}
-                    for block in ibcd_keys:
-                        cresult = server.run_command(f"setblock 0 0 0 {block}", urcon=True).wait()
-                        results[block] = {
-                            "rcon-result": cresult,
-                            "pass": "Changed the block" in cresult[-1]
-                        }
-                        
-                    test_ibcd_fn = f"./test-ibcd-results-{time.time()}.json"
-                    with open(test_ibcd_fn, "w", encoding="utf-8") as f:
-                        json.dump(results, f, indent=4, ensure_ascii=False)
-                    
-                    logging.info(f"tested ibcd, results saved to {test_ibcd_fn}")
-                    
-                    if "y" in input("please check the results file.\ndo you want to remove the cannot pass block? (y/n) > ").lower():
-                        for block in ibcd_keys:
-                            if not results[block]["pass"]:
-                                ibcd_data.pop(block)
-                                logging.info(f"removed {block}.")
-                        save_ibcd()
-                
-                case "connect-rcon":
-                    addr, port = input("addr:port > ").split(":")
-                    password = input("password > ")
-                    server.connect_rcon(addr, int(port), password)
-                    logging.info("connect rcon success.")
-                
-                case "enable-rcon": rcon_mode = True
-                case "disable-rcon": rcon_mode = False
-                
-                case "set-heavy-task-runner":
-                    runners = [
-                        "run_adwl (using stdin or rcon)",
-                        "run_adwl_byfunc (using datapack function)"
-                    ]
-                    print()
-                    
-                    for i, ri in enumerate(runners):
-                        print(f"{i + 1}. {ri}")
-                    
-                    heavy_taskrunner = getattr(server, input("runner function name > "))
-                
-                case "py-exec":
-                    exec(input("code > "))
-                
-                case "cls" | "clear":
-                    print("\033c", end="")
-                
-                case _:
-                    logging.info("unknown command.")
+            if res == "break":
+                break
         except caseException as e:
             logging.error(f"exception: {e}")
             
