@@ -414,7 +414,7 @@ class MinecraftServer:
     
     def run_adwl_byfunc(self, urcon: bool = False):
         functext = "\n".join(self.waiting_commands)
-        return self.run_command_byfunc(functext, False, urcon)
+        return self.run_command_byfunc(functext, urcon)
     
     def setblock(self, x: int, y: int, z: int, block: str, extend: str|None = None, adwl: bool = False, urcon: bool = False):
         if extend is None: extend = ""
