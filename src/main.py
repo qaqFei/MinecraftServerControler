@@ -65,8 +65,7 @@ class CmdRunner:
         return self.server.run_command(cmd, urcon=True).wait()
     
     def kill(self, selector: str):
-        res = self.run(f"kill {selector}")
-        return res[res.index("]: ") + 3:]
+        return self.run(f"kill {selector}")
     
     def give(self, selector: str, item: str, count: int = 1, nbt: typing.Optional[dict] = None):
         if nbt is None:
@@ -738,8 +737,8 @@ if __name__ == "__main__":
                     server.connect_rcon(addr, int(port), password)
                     logging.info("connect rcon success.")
                 
-                case "enable-rcon": server.cmd_runner.rcon_mode = rcon_mode = True
-                case "disable-rcon": server.cmd_runner.rcon_mode = rcon_mode = False
+                case "enable-rcon": rcon_mode = True
+                case "disable-rcon": rcon_mode = False
                 
                 case "set-heavy-task-runner":
                     runners = [
