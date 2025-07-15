@@ -383,15 +383,17 @@ def summon_triangle_with_lighting(server, p1, p2, p3, base_color=(0x39, 0xbb, 0x
     
     return [p1, p2, p3]
 
-def main(server, sender, args):
-    global dim
+def main(server, sender, tokens: list[str]):
+    if len(tokens) < 2:
+        _tellraw(server, sender, {"text": "usage: 3dtest <filepath> <x,y,z>", "color": "red"})
+        return
     
     _tellraw(server, sender, {"text": "正在渲染带光照的3D模型...", "color": "green"})
     
     import trimesh
     
-    mesh = trimesh.load(r"C:\Users\QAQ\Desktop\七七.stl")
-    topy = lambda p: tuple(map(float, p))
+    mesh = trimesh.load(tokens[0])
+    topy = lambda p: tuple(map(lambda x, y: x + y, tuple(map(float, p)), map(float, tokens[1].split(","))))
     
     # 设置光照参数
     light_dir = (0.5, 0.7, 0.5)  # 光源方向
